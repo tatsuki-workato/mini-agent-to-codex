@@ -273,9 +273,7 @@ async fn request_model(
         }
     }
 
-    messages.push(
-        "モデルへの問い合わせを5回行ってもツール呼び出しが続いたため停止しました".to_string(),
-    );
+    messages.push("ツール呼び出しが5回続いたため停止しました".to_string());
     Ok((messages, history))
 }
 
