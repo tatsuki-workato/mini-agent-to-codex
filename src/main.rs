@@ -5,6 +5,7 @@ use serde_json::json;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
 
+    // モデルへの依頼と、モデルが呼び出せるツールの仕様を組み立てる。
     let body = json!({
         "model": "qwen3.5:9b",
         "input": "カレントディレクトリに何があるか確認して",
@@ -28,12 +29,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ]
     });
 
+    // ローカルのモデルにリクエストを送る。
     let response = client
         .post("http://localhost:11434/v1/responses")
         .json(&body)
         .send()
         .await?;
 
+    // 応答を JSON として読み取り、内容を確認できる形で表示する。
     let json: serde_json::Value = response.json().await?;
 
     println!("{}", serde_json::to_string_pretty(&json)?);
