@@ -56,10 +56,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== 2. Model Response ===");
     println!("{}", serde_json::to_string_pretty(&response)?);
 
-    // 応答の中から list_files の呼び出しだけを取り出す。
-    if let Some(outputs) = response["output"].as_array() {
-        for output in outputs {
-            if output["type"] == "function_call" && output["name"] == "list_files" {
+    // output が配列でなければ、実行するツールがないので終了する。
+    let outputs = match response["output"].as_array() {
+        Some(outputs) => outputs,
+        None => return Ok(()),
+    };
+
+    // 各項目の種別と名前を照合し、list_files の呼び出しだけを実行する。
+    for output in outputs {
+        match (output["type"].as_str(), output["name"].as_str()) {
+            (Some("function_call"), Some("list_files")) => {
                 println!("\n=== 3. Tool Call ===");
                 println!("name: {}", output["name"]);
                 println!("arguments: {}", output["arguments"]);
@@ -79,6 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\n=== 5. Tool Result ===");
                 println!("{}", serde_json::to_string_pretty(&files)?);
             }
+            _ => {}
         }
     }
 
