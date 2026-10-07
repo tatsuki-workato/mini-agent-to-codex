@@ -6,21 +6,52 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use reqwest::Client;
 use serde_json::{Value, json};
+use std::fs;
 use std::io;
 use tokio::sync::mpsc;
 
-// 入力した文章を Ollama に送り、通常の文章回答を取り出す。
-async fn request_model(prompt: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+// 指定したディレクトリの直下にある項目名を、ツールの結果として文字列の一覧にする。
+fn list_files(path: &str) -> Result<Vec<String>, std::io::Error> {
+    let mut files = Vec::new();
+
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        files.push(entry.file_name().to_string_lossy().to_string());
+    }
+
+    Ok(files)
+}
+
+// 入力した文章を Ollama に送り、文章回答またはツールの実行結果を取り出す。
+async fn request_model(
+    prompt: String,
+) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
     let client = Client::new();
 
-    // モデルへの依頼を組み立てる。今回はツールを渡さず、入力欄の文章を送る。
+    // モデルへの依頼と、呼び出し可能な list_files ツールの仕様を定義する。
     let body = json!({
         "model": "qwen3.5:9b",
         "input": prompt,
-        "think": false
+        "think": false,
+        "tools": [
+            {
+                "type": "function",
+                "name": "list_files",
+                "description": "指定したディレクトリ内のファイルとディレクトリ一覧を取得する",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        ]
     });
 
-    // ローカルモデルの応答を JSON として受け取る。
+    // ローカルモデルの応答を JSON として受け取り、ツール呼び出しの有無を調べる。
     let response: Value = client
         .post("http://localhost:11434/v1/responses")
         .json(&body)
@@ -30,11 +61,32 @@ async fn request_model(prompt: String) -> Result<String, Box<dyn std::error::Err
         .json()
         .await?;
 
-    // output の文章部分を取り出し、会話欄に表示する文字列にする。
-    let mut answer = String::new();
-    if let Some(outputs) = response["output"].as_array() {
-        for output in outputs {
-            if output["type"] == "message" {
+    // output が配列でなければ、表示できる応答がないので終了する。
+    let outputs = match response["output"].as_array() {
+        Some(outputs) => outputs,
+        None => return Err("モデルの応答に output がありませんでした".into()),
+    };
+
+    let mut messages = Vec::new();
+    // 各項目の種別と名前を照合し、文章の表示か list_files の実行を選ぶ。
+    for output in outputs {
+        match (output["type"].as_str(), output["name"].as_str()) {
+            (Some("function_call"), Some("list_files")) => {
+                // モデルが文字列で返した引数を JSON に変換し、対象パスを取得する。
+                let arguments = output["arguments"].as_str().unwrap_or("{}");
+                let args: Value = serde_json::from_str(arguments)?;
+                let path = args["path"].as_str().unwrap_or(".");
+
+                // ローカルでツールを実行し、呼び出しと結果を会話欄に表示する。
+                let files = list_files(path)?;
+                messages.push(format!("ツール呼び出し: list_files({path:?})"));
+                messages.push(format!(
+                    "ツール結果:\n{}",
+                    serde_json::to_string_pretty(&files)?
+                ));
+            }
+            (Some("message"), _) => {
+                let mut answer = String::new();
                 if let Some(parts) = output["content"].as_array() {
                     for part in parts {
                         if part["type"] == "output_text" {
@@ -47,14 +99,21 @@ async fn request_model(prompt: String) -> Result<String, Box<dyn std::error::Err
                         }
                     }
                 }
+                if !answer.is_empty() {
+                    messages.push(format!("Ollama: {answer}"));
+                }
             }
+            (Some("function_call"), _) => {
+                messages.push(format!("未対応のツール: {}", output["name"]));
+            }
+            _ => {}
         }
     }
 
-    if answer.is_empty() {
-        Err("モデルから文章の応答がありませんでした".into())
+    if messages.is_empty() {
+        Err("モデルから表示できる応答がありませんでした".into())
     } else {
-        Ok(answer)
+        Ok(messages)
     }
 }
 
@@ -117,7 +176,7 @@ fn draw(frame: &mut Frame, input: &str, messages: &[String], busy: bool) {
 }
 
 async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
-    let (sender, mut receiver) = mpsc::unbounded_channel::<Result<String, String>>();
+    let (sender, mut receiver) = mpsc::unbounded_channel::<Result<Vec<String>, String>>();
     let mut events = EventStream::new();
     let mut input = String::new();
     let mut messages: Vec<String> = Vec::new();
@@ -165,7 +224,7 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
             result = receiver.recv(), if busy => {
                 busy = false;
                 match result {
-                    Some(Ok(answer)) => messages.push(format!("Ollama: {answer}")),
+                    Some(Ok(output)) => messages.extend(output),
                     Some(Err(error)) => messages.push(format!("エラー: {error}")),
                     None => messages.push("エラー: 応答を受け取れませんでした".to_string()),
                 }
