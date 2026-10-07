@@ -72,16 +72,18 @@ async fn run_command(
     ))
 }
 
-// 入力した文章を Ollama に送り、文章回答またはツールの実行結果を取り出す。
+// 会話履歴を Ollama に送り、ツールの結果を返しながら最終回答まで繰り返す。
 async fn request_model(
     prompt: String,
-) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    mut history: Vec<Value>,
+) -> Result<(Vec<String>, Vec<Value>), Box<dyn std::error::Error + Send + Sync>> {
     let client = Client::new();
+    history.push(json!({"role": "user", "content": prompt}));
 
     // モデルへの依頼と、呼び出し可能なツールの仕様を定義する。
-    let body = json!({
+    let mut body = json!({
         "model": "qwen3.5:9b",
-        "input": prompt,
+        "input": [],
         "think": false,
         "tools": [
             {
@@ -154,101 +156,127 @@ async fn request_model(
         ]
     });
 
-    // ローカルモデルの応答を JSON として受け取り、ツール呼び出しの有無を調べる。
-    let response: Value = client
-        .post("http://localhost:11434/v1/responses")
-        .json(&body)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-
-    // output が配列でなければ、表示できる応答がないので終了する。
-    let outputs = match response["output"].as_array() {
-        Some(outputs) => outputs,
-        None => return Err("モデルの応答に output がありませんでした".into()),
-    };
-
     let mut messages = Vec::new();
-    // 各項目の種別と名前を照合し、文章の表示かツールの実行を選ぶ。
-    for output in outputs {
-        match (output["type"].as_str(), output["name"].as_str()) {
-            (Some("function_call"), Some("list_files")) => {
-                // モデルが文字列で返した引数を JSON に変換し、対象パスを取得する。
-                let arguments = output["arguments"].as_str().unwrap_or("{}");
-                let args: Value = serde_json::from_str(arguments)?;
-                let path = args["path"].as_str().unwrap_or(".");
+    // ツールを使ったらその結果をモデルへ返す。無限に繰り返さないよう回数を制限する。
+    for _ in 0..5 {
+        body["input"] = json!(history);
+        let response: Value = client
+            .post("http://localhost:11434/v1/responses")
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
 
-                // ローカルでツールを実行し、呼び出しと結果を会話欄に表示する。
-                let files = list_files(path)?;
-                messages.push(format!("ツール呼び出し: list_files({path:?})"));
-                messages.push(format!(
-                    "ツール結果:\n{}",
-                    serde_json::to_string_pretty(&files)?
-                ));
-            }
-            (Some("function_call"), Some("read_file")) => {
-                let arguments = output["arguments"].as_str().unwrap_or("{}");
-                let args: Value = serde_json::from_str(arguments)?;
-                let path = args["path"].as_str().ok_or("path がありません")?;
+        // モデルの出力も履歴に残し、続くツール結果と対応付ける。
+        let outputs = match response["output"].as_array() {
+            Some(outputs) => outputs,
+            None => return Err("モデルの応答に output がありませんでした".into()),
+        };
+        history.extend(outputs.iter().cloned());
+        let mut called_tool = false;
 
-                let content = read_file(path)?;
-                messages.push(format!("ツール呼び出し: read_file({path:?})"));
-                messages.push(format!("ツール結果:\n{content}"));
-            }
-            (Some("function_call"), Some("write_file")) => {
-                let arguments = output["arguments"].as_str().unwrap_or("{}");
-                let args: Value = serde_json::from_str(arguments)?;
-                let path = args["path"].as_str().ok_or("path がありません")?;
-                let content = args["content"].as_str().ok_or("content がありません")?;
+        // 各項目の種別と名前を照合し、文章の表示かツールの実行を選ぶ。
+        for output in outputs {
+            let tool_result = match (output["type"].as_str(), output["name"].as_str()) {
+                (Some("function_call"), Some("list_files")) => {
+                    // モデルが文字列で返した引数を JSON に変換し、対象パスを取得する。
+                    let arguments = output["arguments"].as_str().unwrap_or("{}");
+                    let args: Value = serde_json::from_str(arguments)?;
+                    let path = args["path"].as_str().unwrap_or(".");
 
-                write_file(path, content)?;
-                messages.push(format!("ツール呼び出し: write_file({path:?})"));
-                messages.push("ツール結果: 書き込み完了".to_string());
-            }
-            (Some("function_call"), Some("run_command")) => {
-                let arguments = output["arguments"].as_str().unwrap_or("{}");
-                let args: Value = serde_json::from_str(arguments)?;
-                let program = args["program"].as_str().ok_or("program がありません")?;
-                let command_args: Vec<String> = serde_json::from_value(args["args"].clone())?;
+                    // ローカルでツールを実行し、呼び出しと結果を会話欄に表示する。
+                    let files = list_files(path)?;
+                    let result = serde_json::to_string_pretty(&files)?;
+                    messages.push(format!("ツール呼び出し: list_files({path:?})"));
+                    messages.push(format!("ツール結果:\n{result}"));
+                    Some(result)
+                }
+                (Some("function_call"), Some("read_file")) => {
+                    let arguments = output["arguments"].as_str().unwrap_or("{}");
+                    let args: Value = serde_json::from_str(arguments)?;
+                    let path = args["path"].as_str().ok_or("path がありません")?;
 
-                let result = run_command(program, &command_args).await?;
-                messages.push(format!(
-                    "ツール呼び出し: run_command({program:?}, {command_args:?})"
-                ));
-                messages.push(format!("ツール結果:\n{result}"));
-            }
-            (Some("message"), _) => {
-                let mut answer = String::new();
-                if let Some(parts) = output["content"].as_array() {
-                    for part in parts {
-                        if part["type"] == "output_text" {
-                            if let Some(text) = part["text"].as_str() {
-                                if !answer.is_empty() {
-                                    answer.push('\n');
+                    let content = read_file(path)?;
+                    messages.push(format!("ツール呼び出し: read_file({path:?})"));
+                    messages.push(format!("ツール結果:\n{content}"));
+                    Some(content)
+                }
+                (Some("function_call"), Some("write_file")) => {
+                    let arguments = output["arguments"].as_str().unwrap_or("{}");
+                    let args: Value = serde_json::from_str(arguments)?;
+                    let path = args["path"].as_str().ok_or("path がありません")?;
+                    let content = args["content"].as_str().ok_or("content がありません")?;
+
+                    write_file(path, content)?;
+                    messages.push(format!("ツール呼び出し: write_file({path:?})"));
+                    messages.push("ツール結果: 書き込み完了".to_string());
+                    Some("書き込み完了".to_string())
+                }
+                (Some("function_call"), Some("run_command")) => {
+                    let arguments = output["arguments"].as_str().unwrap_or("{}");
+                    let args: Value = serde_json::from_str(arguments)?;
+                    let program = args["program"].as_str().ok_or("program がありません")?;
+                    let command_args: Vec<String> = serde_json::from_value(args["args"].clone())?;
+
+                    let result = run_command(program, &command_args).await?;
+                    messages.push(format!(
+                        "ツール呼び出し: run_command({program:?}, {command_args:?})"
+                    ));
+                    messages.push(format!("ツール結果:\n{result}"));
+                    Some(result)
+                }
+                (Some("message"), _) => {
+                    let mut answer = String::new();
+                    if let Some(parts) = output["content"].as_array() {
+                        for part in parts {
+                            if part["type"] == "output_text" {
+                                if let Some(text) = part["text"].as_str() {
+                                    if !answer.is_empty() {
+                                        answer.push('\n');
+                                    }
+                                    answer.push_str(text);
                                 }
-                                answer.push_str(text);
                             }
                         }
                     }
+                    if !answer.is_empty() {
+                        messages.push(format!("Ollama: {answer}"));
+                    }
+                    None
                 }
-                if !answer.is_empty() {
-                    messages.push(format!("Ollama: {answer}"));
+                (Some("function_call"), _) => {
+                    messages.push(format!("未対応のツール: {}", output["name"]));
+                    Some(format!("未対応のツール: {}", output["name"]))
                 }
+                _ => None,
+            };
+
+            if let Some(result) = tool_result {
+                called_tool = true;
+                let call_id = output["call_id"].as_str().ok_or("call_id がありません")?;
+                history.push(json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": result
+                }));
             }
-            (Some("function_call"), _) => {
-                messages.push(format!("未対応のツール: {}", output["name"]));
-            }
-            _ => {}
+        }
+
+        if !called_tool {
+            return if messages.is_empty() {
+                Err("モデルから表示できる応答がありませんでした".into())
+            } else {
+                Ok((messages, history))
+            };
         }
     }
 
-    if messages.is_empty() {
-        Err("モデルから表示できる応答がありませんでした".into())
-    } else {
-        Ok(messages)
-    }
+    messages.push(
+        "モデルへの問い合わせを5回行ってもツール呼び出しが続いたため停止しました".to_string(),
+    );
+    Ok((messages, history))
 }
 
 fn draw(frame: &mut Frame, input: &str, messages: &[String], busy: bool) {
@@ -310,10 +338,13 @@ fn draw(frame: &mut Frame, input: &str, messages: &[String], busy: bool) {
 }
 
 async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
-    let (sender, mut receiver) = mpsc::unbounded_channel::<Result<Vec<String>, String>>();
+    let (sender, mut receiver) =
+        mpsc::unbounded_channel::<Result<(Vec<String>, Vec<Value>), String>>();
     let mut events = EventStream::new();
     let mut input = String::new();
     let mut messages: Vec<String> = Vec::new();
+    // 画面に表示する文章とは別に、モデルへ送る会話履歴を保持する。
+    let mut history: Vec<Value> = Vec::new();
     let mut busy = false;
 
     loop {
@@ -335,8 +366,9 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
                             busy = true;
 
                             let sender = sender.clone();
+                            let history = history.clone();
                             tokio::spawn(async move {
-                                let result = request_model(prompt).await.map_err(|error| error.to_string());
+                                let result = request_model(prompt, history).await.map_err(|error| error.to_string());
                                 let _ = sender.send(result);
                             });
                         }
@@ -358,7 +390,10 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
             result = receiver.recv(), if busy => {
                 busy = false;
                 match result {
-                    Some(Ok(output)) => messages.extend(output),
+                    Some(Ok((output, new_history))) => {
+                        messages.extend(output);
+                        history = new_history;
+                    }
                     Some(Err(error)) => messages.push(format!("エラー: {error}")),
                     None => messages.push("エラー: 応答を受け取れませんでした".to_string()),
                 }
