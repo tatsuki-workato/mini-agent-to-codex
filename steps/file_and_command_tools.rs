@@ -80,7 +80,7 @@ async fn request_model(
 
     // モデルへの依頼と、呼び出し可能なツールの仕様を定義する。
     let body = json!({
-        "model": "qwen3.5:9b",
+        "model": "qwen3.5:4b",
         "input": prompt,
         "think": false,
         "tools": [

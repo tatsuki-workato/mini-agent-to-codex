@@ -7,7 +7,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // モデルへの依頼と、モデルが呼び出せるツールの仕様を組み立てる。
     let body = json!({
-        "model": "qwen3.5:9b",
+        "model": "qwen3.5:4b",
         "input": "カレントディレクトリに何があるか確認して",
         "think": false,
         "tools": [

@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // モデルへの依頼と、呼び出し可能な list_files ツールの仕様を定義する。
     let body = json!({
-        "model": "qwen3.5:9b",
+        "model": "qwen3.5:4b",
         "input": "カレントディレクトリに何があるか確認して",
         "think": false,
         "tools": [

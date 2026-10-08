@@ -15,7 +15,7 @@ async fn request_model(prompt: String) -> Result<String, Box<dyn std::error::Err
 
     // モデルへの依頼を組み立てる。今回はツールを渡さず、入力欄の文章を送る。
     let body = json!({
-        "model": "qwen3.5:9b",
+        "model": "qwen3.5:4b",
         "input": prompt,
         "think": false
     });

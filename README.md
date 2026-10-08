@@ -44,23 +44,23 @@ Ollamaが利用できるようになったら、Qwenを今回の教材用LLMモ�
 > 文章生成、要約、翻訳、コーディング、画像理解などに対応する複数のモデルがあります
 
 
-今回は`qwen 3.5 9b`を利用します。
+今回は`qwen 3.5 4b`を利用します。
 
-https://ollama.com/library/qwen3.5
+https://ollama.com/library/qwen3.5:4b
 
-大体6.6GB - 7.6GBのストレージを消費するのでご注意ください。
+大体3.3GB - 4.0GBのストレージを消費するのでご注意ください。
 
 >「3.5」はモデルの世代・バージョンを表します。
 >
->「9B」のBはBillion（10億）の意味で、約90億個のパラメータを持つモデルということです。
+>「4B」のBはBillion（10億）の意味で、約40億個のパラメータを持つモデルということです。
 >
 >一般にパラメータ数が多いほど、複雑な知識やパターンを保持でき、推論・文章生成などの能力が高くなる傾向があります。
 >
 >しかし、大きいモデルほど必要なメモリや計算量も増えます。
 >
->今回はローカルPC(メモリ16GB以上くらいのApple Silicon Mac)で動かすことを想定して、これくらいなら動くだろうということで選定しています。
+>今回はなるべく多くのPCで試せるよう、比較的小さい4Bを選定しています。
 >
->きつかったら4Bを使いましょう。
+>PCのスペックに余裕がある人は9Bや他のモデルも試してみてください
 
 
 ここからはターミナルを使った作業が多くなります。ターミナルを開いてください。
@@ -68,7 +68,7 @@ https://ollama.com/library/qwen3.5
 モデルを取得し、対話ができる以下のコマンドをターミナルに貼り付けてください。
 
 ```sh
-ollama run qwen3.5:9b
+ollama run qwen3.5:4b
 ```
 モデルを取得してくるのに少し時間がかかりますが、完了したらLLMと会話ができるようになっていると思うので遊んでみて下さい。
 
@@ -80,7 +80,7 @@ ollama run qwen3.5:9b
 curl http://localhost:11434/v1/responses \
  -H 'Content-Type: application/json' \
  -d '{
-   "model": "qwen3.5:9b",
+   "model": "qwen3.5:4b",
    "input": "123と456を足して",
    "think": false
  }' | jq
@@ -112,7 +112,7 @@ QwenがTool Callingに対応しているか見てみましょう。
 以下のコマンドをターミナルで実行すると　`Capabilities`のなかに`tools`　という項目があり、対応していることがわかると思います。
 
 ```sh
-ollama show qwen3.5:9b
+ollama show qwen3.5:4b
 ```
 
 
@@ -136,7 +136,7 @@ toolを使うべきか
 curl http://localhost:11434/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "qwen3.5:9b",
+    "model": "qwen3.5:4b",
     "input": "カレントディレクトリに何があるか確認して",
     "think": false,
     "tools": [
@@ -180,7 +180,7 @@ curl http://localhost:11434/v1/responses \
   "completed_at": 1791347652,
   "status": "completed",
   "incomplete_details": null,
-  "model": "qwen3.5:9b",
+  "model": "qwen3.5:4b",
   "previous_response_id": null,
   "instructions": null,
   "output": [
@@ -226,7 +226,7 @@ inputの内容を変えてさまざま試して下さい。
 curl http://localhost:11434/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "qwen3.5:9b",
+    "model": "qwen3.5:4b",
     "input": "httpサーバー起動",                        
     "think": false,
     "tools": [
@@ -421,7 +421,7 @@ shで12345679 × 9を計算して出力
 
 例えば最後の計算を
 ```sh
-ollama run qwen3.5:9b --think=false
+ollama run qwen3.5:4b --think=false
 ```
 
 で起動したQwenに直接聞いてみるとshを作るより非常に時間をかけて回答してくるのがわかります。
