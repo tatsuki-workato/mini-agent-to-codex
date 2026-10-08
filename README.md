@@ -216,7 +216,7 @@ curl http://localhost:11434/v1/responses \
 // 長いので省略
 ```
 
-ではlist_filesをツールとして渡したものの、関係がなさそうなinputの場合はどうなるでしょうか？
+では`list_files`をツールとして渡したものの、関係がなさそうなinputの場合はどうなるでしょうか？
 
 この場合は`function_call`以外の`type`で返答が返ってくるはずです。
 
@@ -295,7 +295,7 @@ fn main() {
 }
 ```
 
-以降のリンクは各段階の `src/main.rs` の全文です。試すときは、リンク先の内容を `src/main.rs` にコピーしてください。
+以降のリンクは各段階のコード全文です。試すときは、リンク先の内容を指定されたファイルにコピーしてください。
 
 
 続いて、HTTPリクエストをRustで送受信するためのクレート（再利用できるRustのライブラリ）をプロジェクトに追加します。
@@ -327,11 +327,69 @@ mini-coding-agentプロジェクトのsrc/main.rsについてわかりやすく�
 
 では次に、ツールを実装し、モデルがその使用を要求したらプログラム側で実行できるようにしましょう。
 
-`src/main.rs` のコードを以下のように変更しましょう。
+ここでは、コードを `main.rs` と `tool.rs` の2つのファイルに分けます。
 
-[この段階の `main.rs` 全文](steps/list_files.rs)
+- `main.rs` は、LLMへのリクエストと、返ってきたツール呼び出しの処理を担当します。
+- `tool.rs` は、実際にディレクトリ内の一覧を取得する `list_files` 関数を実装します。
+
+まず、`src/tool.rs` を新しく作成し、以下のコードをコピーしてください。
+
+[この段階の `tool.rs` 全文](steps/list_files/tool.rs)
+
+`list_files` は、パスを受け取ってファイル・ディレクトリ名の一覧を返す普通のRust関数です。関数の中ではLLMを呼び出していません。`pub` は、別のモジュールからこの関数を呼び出せるようにする指定です。
+
+次に、`src/main.rs` を以下のコードに置き換えてください。
+
+[この段階の `main.rs` 全文](steps/list_files/main.rs)
+
+ファイルの配置は以下のようになります。
+
+```text
+mini-coding-agent/
+└── src/
+    ├── main.rs
+    └── tool.rs
+```
+
+`main.rs` の先頭にある `mod tool;` によって、`tool.rs` をモジュールとして読み込みます。LLMが `list_files` の呼び出しを要求したら、`main.rs` が引数を取り出して `tool::list_files(path)` を呼び出します。
+
+リクエスト内のツール定義は、LLMに関数の名前・用途・引数を知らせるものです。実際にファイル一覧を取得するのは、`tool.rs` に書いたRustのプログラムです。
 
 コードを変更したら`cargo run`してください。実行したディレクトリでlsしたのと同じように、ファイル一覧が出力されるはずです。
+
+#### 寄り道：ツールをテストから直接動かす
+
+ここで少し寄り道して、Rustのテストコードから `list_files` を直接呼び出してみましょう。Ollamaを起動しなくても試せます。
+
+テストに必要なファイルは、一時ディレクトリにテスト自身が用意します。これによって、実行環境にどんなファイルがあるかに依存せず、同じ条件で動作を確認できます。
+
+まず、`mini-coding-agent` ディレクトリで、一時ディレクトリを扱うクレートをテスト用の依存関係として追加してください。
+
+```sh
+cargo add tempfile --dev
+```
+
+`src/tool.rs` の中身を以下のように変更してください。`src/main.rs` の変更は不要です。
+
+[テストを追加した `tool.rs` 全文](steps/list_files_test/tool.rs)
+
+`mini-coding-agent` ディレクトリで、以下を実行してください。
+
+```sh
+cargo test list_files_returns_created_entries -- --nocapture
+```
+
+`cargo test` はテスト用のプログラムを実行します。このとき通常の `main()` は実行されないので、LLMへのHTTPリクエストも送られません。`--nocapture` を付けると、成功したテストでも `println!` の出力が表示されます。
+
+ファイル一覧が表示され、次のような結果が出れば成功です。
+
+```text
+test tool::tests::list_files_returns_created_entries ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+ここで実行したのは、`main.rs` がLLMの要求を受けて呼び出すものと同じ `list_files` 関数です。LLMは使うツールと引数を選び、実際の処理はRustの関数が行います。その関数は、このようにテストからも直接実行できます。
 
 
 ### TUIを作る

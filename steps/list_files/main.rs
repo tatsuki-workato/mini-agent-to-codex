@@ -1,18 +1,7 @@
+mod tool;
+
 use reqwest::Client;
 use serde_json::{Value, json};
-use std::fs;
-
-// 指定したディレクトリの直下にある項目名を、モデルに返せる文字列の一覧にする。
-fn list_files(path: &str) -> Result<Vec<String>, std::io::Error> {
-    let mut files = Vec::new();
-
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        files.push(entry.file_name().to_string_lossy().to_string());
-    }
-
-    Ok(files)
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -80,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("list_files({path:?})");
 
                 // ローカルでツールを実行し、その結果を表示する。
-                let files = list_files(path)?;
+                let files = tool::list_files(path)?;
 
                 println!("\n=== 5. Tool Result ===");
                 println!("{}", serde_json::to_string_pretty(&files)?);
