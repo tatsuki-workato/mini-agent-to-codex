@@ -400,6 +400,8 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 いままで書いていた処理はあとで戻すので安心してください。
 
+この段階では `src/tool.rs` は使いませんが、ファイルはそのまま残しておいてください。
+
 >TUI（Terminal User Interface）は、ターミナル上で文字や枠、キー操作を使って操作するユーザーインターフェースです。
 
 
@@ -437,9 +439,13 @@ cargo add futures-util
 
 続いて、ツールを呼び出す処理を復活させます。
 
-`src/main.rs` のコードを以下のように変更しましょう。
+`src/tool.rs` は、先ほど作った `list_files` の実装をそのまま使います。
 
-[この段階の `main.rs` 全文](steps/tui_list_files.rs)
+[この段階の `tool.rs` 全文](steps/tui_list_files/tool.rs)
+
+`src/main.rs` を以下のコードに置き換えてください。`mod tool;` を戻し、LLMが要求したら `tool::list_files(path)` を呼び出します。
+
+[この段階の `main.rs` 全文](steps/tui_list_files/main.rs)
 
 コードを変更したら`cargo run`して立ち上がったTUIにこんな質問をしてみてください。
 
@@ -462,9 +468,13 @@ cargo add futures-util
  run_command(program, args):  プロジェクトのディレクトリでプログラムを実行し、終了コード・標準出力・標準エラーを返す。30秒でタイムアウトする 
 ```
 
-`src/main.rs` のコードを以下のように変更しましょう。
+まず、`src/tool.rs` を以下のコードに置き換えてください。既存の `list_files` に加えて、`read_file`、`write_file`、`run_command` の実装を追加します。
 
-[この段階の `main.rs` 全文](steps/file_and_command_tools.rs)
+[この段階の `tool.rs` 全文](steps/file_and_command_tools/tool.rs)
+
+次に、`src/main.rs` を以下のコードに置き換えてください。LLMに渡すツール定義を増やし、返ってきた名前と引数に応じて `tool.rs` の関数を呼び出します。
+
+[この段階の `main.rs` 全文](steps/file_and_command_tools/main.rs)
 
 コードを変更したら`cargo run`して立ち上がったTUIにこんな質問をしてみてください。
 
@@ -499,9 +509,13 @@ ollama run qwen3.5:4b --think=false
 
 これを解決するためにAgent Loopを組み込みます。
 
-`src/main.rs` のコードを以下のように変更しましょう。
+`src/tool.rs` は「ツールを増やす」の段階から変更しません。
 
-[この段階の `main.rs` 全文](steps/agent_loop.rs)
+[この段階の `tool.rs` 全文](steps/agent_loop/tool.rs)
+
+`src/main.rs` を以下のコードに置き換えてください。ツールの実行結果をLLMに返し、次の操作や最終回答を得る処理を繰り返します。
+
+[この段階の `main.rs` 全文](steps/agent_loop/main.rs)
 
 コードを変更したら`cargo run`して立ち上がったTUIにこんな質問をしてみてください。
 

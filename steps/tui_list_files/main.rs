@@ -1,3 +1,5 @@
+mod tool;
+
 use futures_util::StreamExt;
 use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -6,21 +8,8 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use reqwest::Client;
 use serde_json::{Value, json};
-use std::fs;
 use std::io;
 use tokio::sync::mpsc;
-
-// 指定したディレクトリの直下にある項目名を、ツールの結果として文字列の一覧にする。
-fn list_files(path: &str) -> Result<Vec<String>, std::io::Error> {
-    let mut files = Vec::new();
-
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        files.push(entry.file_name().to_string_lossy().to_string());
-    }
-
-    Ok(files)
-}
 
 // 入力した文章を Ollama に送り、文章回答またはツールの実行結果を取り出す。
 async fn request_model(
@@ -78,7 +67,7 @@ async fn request_model(
                 let path = args["path"].as_str().unwrap_or(".");
 
                 // ローカルでツールを実行し、呼び出しと結果を会話欄に表示する。
-                let files = list_files(path)?;
+                let files = tool::list_files(path)?;
                 messages.push(format!("ツール呼び出し: list_files({path:?})"));
                 messages.push(format!(
                     "ツール結果:\n{}",
