@@ -399,12 +399,9 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 いったん今までのツール呼び出しやLLMのことは忘れて、Claude CodeやCodexのようなターミナルでの入力画面(TUI)を作りましょう。
 
-いままで書いていた処理はあとで戻すので安心してください。
-
-この段階では `src/tool.rs` は使いませんが、ファイルはそのまま残しておいてください。
-
 >TUI（Terminal User Interface）は、ターミナル上で文字や枠、キー操作を使って操作するユーザーインターフェースです。
 
+この段階では `src/tool.rs` は使いませんが、ファイルはそのまま残しておいてください。
 
 まずは必要なクレートを入れましょう。
 
@@ -484,11 +481,7 @@ mini-coding-agent/
 
 ### ツールを増やす
 
-続いて、このCoding Agentにツールを追加します。
-
-`src/http.rs` はそのまま使います。
-
-[この段階の `http.rs` 全文](steps/file_and_command_tools/http.rs)
+続いて、このCoding Agentに以下のようなツールを追加します。
 
 ```
  list_files(path):  指定したディレクトリの直下にあるファイル・ディレクトリ名を一覧にする(既存)
@@ -504,6 +497,10 @@ mini-coding-agent/
 次に、`src/main.rs` を以下のコードに置き換えてください。LLMに渡すツール定義を増やし、返ってきた名前と引数に応じて `tool.rs` の関数を呼び出します。
 
 [この段階の `main.rs` 全文](steps/file_and_command_tools/main.rs)
+
+`src/http.rs` はそのまま使います。
+
+[この段階の `http.rs` 全文](steps/file_and_command_tools/http.rs)
 
 コードを変更したら`cargo run`して立ち上がったTUIにこんな質問をしてみてください。
 
@@ -601,8 +598,6 @@ mini-coding-agent/
 
 `main.rs` は入力された依頼と通知用の送信側を `agent::run_turn(prompt, sender)` に渡します。Agentは、モデルへの問い合わせ、ツールの呼び出し、実行結果、文章回答をチャネルでその都度送り、TUIは受け取るたびに表示を更新します。ツールの呼び出しは実行前に表示するので、時間のかかるコマンドでも何をしているか確認できます。
 
-途中経過の `AgentEvent::Message` と、処理完了の `AgentEvent::Finished` を区別しています。途中経過を表示しても依頼の処理は続き、完了通知が届いたら次の依頼を送れるようになります。
-
 この段階の履歴は一つの依頼の途中経過を残すもので、次のユーザー入力には引き継ぎません。モデルへの問い合わせは一つの依頼につき10回までに制限しています。
 
 動作を確かめるために、`mini-coding-agent` ディレクトリ直下に `double.sh` を作り、以下のコードをコピーしてください。整数の2倍を出力するつもりのプログラムですが、計算式に誤りがあります。
@@ -649,7 +644,7 @@ Agent Loopでも履歴は使っていました。違いは、一つの依頼が�
 
 `main.rs` は `agent::run_turn(prompt, history, sender)` に履歴と通知用の送信側を渡します。途中経過は引き続きその都度表示し、処理が終わったら `AgentEvent::Finished` に含まれる更新した履歴を保存します。この履歴はアプリを終了すると失われます。
 
-`cargo run` で起動し直すときは、前のプロセスの履歴は引き継がれません。同じTUI内で、まず対象を明示した依頼を送ってください。
+`cargo run` で起動し直すときは、前のプロセスの履歴は引き継がれません。
 
 ```text
 このディレクトリ配下にあるdouble.shを修正し、実行結果が期待通りになることを確認してください

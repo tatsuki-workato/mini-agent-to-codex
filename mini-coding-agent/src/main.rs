@@ -75,6 +75,8 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
     let mut events = EventStream::new();
     let mut input = String::new();
     let mut messages: Vec<String> = Vec::new();
+    // 表示用メッセージとは別に、モデルへ送る履歴をユーザー入力の間も保持する。
+    let mut history = Vec::new();
     let mut busy = false;
 
     loop {
@@ -96,8 +98,9 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
                             busy = true;
 
                             let sender = sender.clone();
+                            let history = history.clone();
                             tokio::spawn(async move {
-                                let result = agent::run_turn(prompt, sender.clone()).await.map_err(|error| error.to_string());
+                                let result = agent::run_turn(prompt, history, sender.clone()).await.map_err(|error| error.to_string());
                                 let _ = sender.send(AgentEvent::Finished(result));
                             });
                         }
@@ -120,7 +123,8 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
                 match event {
                     // 途中経過ではbusyを解除せず、次の描画でメッセージを表示する。
                     Some(AgentEvent::Message(message)) => messages.push(message),
-                    Some(AgentEvent::Finished(Ok(()))) => {
+                    Some(AgentEvent::Finished(Ok(new_history))) => {
+                        history = new_history;
                         busy = false;
                     }
                     Some(AgentEvent::Finished(Err(error))) => {

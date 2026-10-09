@@ -7,16 +7,17 @@ use tokio::sync::mpsc::UnboundedSender;
 // Messageを受け取っても処理は続き、Finishedで次の入力を受け付ける。
 pub enum AgentEvent {
     Message(String),
-    Finished(Result<(), String>),
+    Finished(Result<Vec<Value>, String>),
 }
 
-// 一つの依頼について、ツール結果を返しながら最終回答まで繰り返す。
+// 前の依頼の履歴に今回の入力を加え、ツール結果を返しながら最終回答まで繰り返す。
+// 表示するメッセージはその都度送り、更新した履歴だけを呼び出し元へ返す。
 pub async fn run_turn(
     prompt: String,
+    mut history: Vec<Value>,
     sender: UnboundedSender<AgentEvent>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // この依頼の途中経過だけを残す履歴。次のユーザー入力には引き継がない。
-    let mut history = vec![json!({"role": "user", "content": prompt})];
+) -> Result<Vec<Value>, Box<dyn std::error::Error + Send + Sync>> {
+    history.push(json!({"role": "user", "content": prompt}));
 
     // モデルへの依頼と、呼び出し可能なツールの仕様を定義する。
     let mut body = json!({
@@ -212,11 +213,11 @@ pub async fn run_turn(
             return if !displayed_message {
                 Err("モデルから表示できる応答がありませんでした".into())
             } else {
-                Ok(())
+                Ok(history)
             };
         }
     }
 
     sender.send(AgentEvent::Message("モデルへの問い合わせが10回に達したため停止しました".to_string()))?;
-    Ok(())
+    Ok(history)
 }
