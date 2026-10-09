@@ -1,13 +1,22 @@
 // main.rsで宣言したHTTP・ツールのモジュールを使う。
 use crate::{http, tool};
 use serde_json::{Value, json};
+use tokio::sync::mpsc::UnboundedSender;
+
+// 途中経過と処理完了を区別して、TUIへ通知する。
+// Messageを受け取っても処理は続き、Finishedで次の入力を受け付ける。
+pub enum AgentEvent {
+    Message(String),
+    Finished(Result<Vec<Value>, String>),
+}
 
 // 前の依頼の履歴に今回の入力を加え、ツール結果を返しながら最終回答まで繰り返す。
-// 更新した履歴を呼び出し元へ返し、次のユーザー入力にも引き継ぐ。
+// 表示するメッセージはその都度送り、更新した履歴だけを呼び出し元へ返す。
 pub async fn run_turn(
     prompt: String,
     mut history: Vec<Value>,
-) -> Result<(Vec<String>, Vec<Value>), Box<dyn std::error::Error + Send + Sync>> {
+    sender: UnboundedSender<AgentEvent>,
+) -> Result<Vec<Value>, Box<dyn std::error::Error + Send + Sync>> {
     history.push(json!({"role": "user", "content": prompt}));
 
     // モデルへの依頼と、呼び出し可能なツールの仕様を定義する。
@@ -86,10 +95,14 @@ pub async fn run_turn(
         ]
     });
 
-    let mut messages = Vec::new();
+    let mut displayed_message = false;
     // 直前の結果を含む履歴を再送し、次の操作をモデルに判断してもらう。
     // 無限に繰り返さないよう、モデルへの問い合わせは10回までにする。
-    for _ in 0..10 {
+    for request_number in 1..=10 {
+        // 次のモデル応答を待っていることも、その都度知らせる。
+        sender.send(AgentEvent::Message(format!(
+            "モデルに問い合わせています（{request_number}/10）"
+        )))?;
         body["input"] = json!(history);
         let response = http::request(&body).await?;
 
@@ -104,6 +117,9 @@ pub async fn run_turn(
 
         // 各項目の種別と名前を照合し、文章の表示かツールの実行を選ぶ。
         for output in outputs {
+            if output["type"] == "function_call" {
+                displayed_message = true;
+            }
             let tool_result = match (output["type"].as_str(), output["name"].as_str()) {
                 (Some("function_call"), Some("list_files")) => {
                     // モデルが文字列で返した引数を JSON に変換し、対象パスを取得する。
@@ -112,10 +128,10 @@ pub async fn run_turn(
                     let path = args["path"].as_str().unwrap_or(".");
 
                     // ローカルでツールを実行し、呼び出しと結果を会話欄に表示する。
+                    sender.send(AgentEvent::Message(format!("ツール呼び出し: list_files({path:?})")))?;
                     let files = tool::list_files(path)?;
                     let result = serde_json::to_string_pretty(&files)?;
-                    messages.push(format!("ツール呼び出し: list_files({path:?})"));
-                    messages.push(format!("ツール結果:\n{result}"));
+                    sender.send(AgentEvent::Message(format!("ツール結果:\n{result}")))?;
                     Some(result)
                 }
                 (Some("function_call"), Some("read_file")) => {
@@ -123,9 +139,9 @@ pub async fn run_turn(
                     let args: Value = serde_json::from_str(arguments)?;
                     let path = args["path"].as_str().ok_or("path がありません")?;
 
+                    sender.send(AgentEvent::Message(format!("ツール呼び出し: read_file({path:?})")))?;
                     let content = tool::read_file(path)?;
-                    messages.push(format!("ツール呼び出し: read_file({path:?})"));
-                    messages.push(format!("ツール結果:\n{content}"));
+                    sender.send(AgentEvent::Message(format!("ツール結果:\n{content}")))?;
                     Some(content)
                 }
                 (Some("function_call"), Some("write_file")) => {
@@ -134,9 +150,9 @@ pub async fn run_turn(
                     let path = args["path"].as_str().ok_or("path がありません")?;
                     let content = args["content"].as_str().ok_or("content がありません")?;
 
+                    sender.send(AgentEvent::Message(format!("ツール呼び出し: write_file({path:?})")))?;
                     tool::write_file(path, content)?;
-                    messages.push(format!("ツール呼び出し: write_file({path:?})"));
-                    messages.push("ツール結果: 書き込み完了".to_string());
+                    sender.send(AgentEvent::Message("ツール結果: 書き込み完了".to_string()))?;
                     Some("書き込み完了".to_string())
                 }
                 (Some("function_call"), Some("run_command")) => {
@@ -145,11 +161,12 @@ pub async fn run_turn(
                     let program = args["program"].as_str().ok_or("program がありません")?;
                     let command_args: Vec<String> = serde_json::from_value(args["args"].clone())?;
 
-                    let result = tool::run_command(program, &command_args).await?;
-                    messages.push(format!(
+                    // 時間のかかるコマンドでも、実行開始を先に表示する。
+                    sender.send(AgentEvent::Message(format!(
                         "ツール呼び出し: run_command({program:?}, {command_args:?})"
-                    ));
-                    messages.push(format!("ツール結果:\n{result}"));
+                    )))?;
+                    let result = tool::run_command(program, &command_args).await?;
+                    sender.send(AgentEvent::Message(format!("ツール結果:\n{result}")))?;
                     Some(result)
                 }
                 (Some("message"), _) => {
@@ -167,12 +184,13 @@ pub async fn run_turn(
                         }
                     }
                     if !answer.is_empty() {
-                        messages.push(format!("Ollama: {answer}"));
+                        displayed_message = true;
+                        sender.send(AgentEvent::Message(format!("Ollama: {answer}")))?;
                     }
                     None
                 }
                 (Some("function_call"), _) => {
-                    messages.push(format!("未対応のツール: {}", output["name"]));
+                    sender.send(AgentEvent::Message(format!("未対応のツール: {}", output["name"])))?;
                     Some(format!("未対応のツール: {}", output["name"]))
                 }
                 _ => None,
@@ -192,14 +210,14 @@ pub async fn run_turn(
 
         // ツール要求がなければ、この依頼のLoopを終える。
         if !called_tool {
-            return if messages.is_empty() {
+            return if !displayed_message {
                 Err("モデルから表示できる応答がありませんでした".into())
             } else {
-                Ok((messages, history))
+                Ok(history)
             };
         }
     }
 
-    messages.push("モデルへの問い合わせが10回に達したため停止しました".to_string());
-    Ok((messages, history))
+    sender.send(AgentEvent::Message("モデルへの問い合わせが10回に達したため停止しました".to_string()))?;
+    Ok(history)
 }

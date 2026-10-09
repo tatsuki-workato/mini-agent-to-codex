@@ -2,6 +2,7 @@ mod agent;
 mod http;
 mod tool;
 
+use agent::AgentEvent;
 use futures_util::StreamExt;
 use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -62,7 +63,7 @@ fn draw(frame: &mut Frame, input: &str, messages: &[String], busy: bool) {
     }
 
     let help = if busy {
-        "Ollama の返答を待っています…  Ctrl+C: 終了"
+        "Agentが処理しています…  Ctrl+C: 終了"
     } else {
         "Enter: 送信  Backspace: 削除  Ctrl+C: 終了"
     };
@@ -70,7 +71,7 @@ fn draw(frame: &mut Frame, input: &str, messages: &[String], busy: bool) {
 }
 
 async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
-    let (sender, mut receiver) = mpsc::unbounded_channel::<Result<Vec<String>, String>>();
+    let (sender, mut receiver) = mpsc::unbounded_channel::<AgentEvent>();
     let mut events = EventStream::new();
     let mut input = String::new();
     let mut messages: Vec<String> = Vec::new();
@@ -79,7 +80,7 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
     loop {
         terminal.draw(|frame| draw(frame, &input, &messages, busy))?;
 
-        // キー入力とAgentの処理完了を同時に待つ。
+        // キー入力とAgentからの途中経過・処理完了を同時に待つ。
         tokio::select! {
             event = events.next() => match event {
                 Some(Ok(Event::Key(key)))
@@ -96,8 +97,8 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
 
                             let sender = sender.clone();
                             tokio::spawn(async move {
-                                let result = agent::run_turn(prompt).await.map_err(|error| error.to_string());
-                                let _ = sender.send(result);
+                                let result = agent::run_turn(prompt, sender.clone()).await.map_err(|error| error.to_string());
+                                let _ = sender.send(AgentEvent::Finished(result));
                             });
                         }
                         KeyCode::Backspace => {
@@ -115,12 +116,21 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
                 None => return Ok(()),
                 _ => {}
             },
-            result = receiver.recv(), if busy => {
-                busy = false;
-                match result {
-                    Some(Ok(output)) => messages.extend(output),
-                    Some(Err(error)) => messages.push(format!("エラー: {error}")),
-                    None => messages.push("エラー: 応答を受け取れませんでした".to_string()),
+            event = receiver.recv(), if busy => {
+                match event {
+                    // 途中経過ではbusyを解除せず、次の描画でメッセージを表示する。
+                    Some(AgentEvent::Message(message)) => messages.push(message),
+                    Some(AgentEvent::Finished(Ok(()))) => {
+                        busy = false;
+                    }
+                    Some(AgentEvent::Finished(Err(error))) => {
+                        messages.push(format!("エラー: {error}"));
+                        busy = false;
+                    }
+                    None => {
+                        messages.push("エラー: 応答を受け取れませんでした".to_string());
+                        busy = false;
+                    }
                 }
             }
         }
