@@ -1,18 +1,17 @@
+mod http;
+
 use futures_util::StreamExt;
 use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
-use reqwest::Client;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::io;
 use tokio::sync::mpsc;
 
 // 入力した文章を Ollama に送り、通常の文章回答を取り出す。
 async fn request_model(prompt: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let client = Client::new();
-
     // モデルへの依頼を組み立てる。今回はツールを渡さず、入力欄の文章を送る。
     let body = json!({
         "model": "qwen3.5:4b",
@@ -21,14 +20,7 @@ async fn request_model(prompt: String) -> Result<String, Box<dyn std::error::Err
     });
 
     // ローカルモデルの応答を JSON として受け取る。
-    let response: Value = client
-        .post("http://localhost:11434/v1/responses")
-        .json(&body)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let response = http::request(&body).await?;
 
     // output の文章部分を取り出し、会話欄に表示する文字列にする。
     let mut answer = String::new();

@@ -1,3 +1,4 @@
+mod http;
 mod tool;
 
 use futures_util::StreamExt;
@@ -6,7 +7,6 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
-use reqwest::Client;
 use serde_json::{Value, json};
 use std::io;
 use tokio::sync::mpsc;
@@ -15,8 +15,6 @@ use tokio::sync::mpsc;
 async fn request_model(
     prompt: String,
 ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let client = Client::new();
-
     // モデルへの依頼と、呼び出し可能なツールの仕様を定義する。
     let body = json!({
         "model": "qwen3.5:4b",
@@ -94,14 +92,7 @@ async fn request_model(
     });
 
     // ローカルモデルの応答を JSON として受け取り、ツール呼び出しの有無を調べる。
-    let response: Value = client
-        .post("http://localhost:11434/v1/responses")
-        .json(&body)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let response = http::request(&body).await?;
 
     // output が配列でなければ、表示できる応答がないので終了する。
     let outputs = match response["output"].as_array() {

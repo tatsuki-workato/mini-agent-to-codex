@@ -1,3 +1,4 @@
+mod http;
 mod tool;
 
 use futures_util::StreamExt;
@@ -6,7 +7,6 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
-use reqwest::Client;
 use serde_json::{Value, json};
 use std::io;
 use tokio::sync::mpsc;
@@ -16,7 +16,6 @@ async fn request_model(
     prompt: String,
     mut history: Vec<Value>,
 ) -> Result<(Vec<String>, Vec<Value>), Box<dyn std::error::Error + Send + Sync>> {
-    let client = Client::new();
     history.push(json!({"role": "user", "content": prompt}));
 
     // モデルへの依頼と、呼び出し可能なツールの仕様を定義する。
@@ -99,14 +98,7 @@ async fn request_model(
     // ツールを使ったらその結果をモデルへ返す。無限に繰り返さないよう回数を制限する。
     for _ in 0..5 {
         body["input"] = json!(history);
-        let response: Value = client
-            .post("http://localhost:11434/v1/responses")
-            .json(&body)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let response = http::request(&body).await?;
 
         // モデルの出力も履歴に残し、続くツール結果と対応付ける。
         let outputs = match response["output"].as_array() {

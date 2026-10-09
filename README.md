@@ -172,7 +172,7 @@ curl http://localhost:11434/v1/responses \
 `"arguments": "{\"path\":\".\"}"` → path に `.`、つまりカレントディレクトリを渡す
 
 という指示を返しています。
-```response.json
+```response.jsonc
 {
   "id": "resp_843953",
   "object": "response",
@@ -212,8 +212,9 @@ curl http://localhost:11434/v1/responses \
         "type": "object"
       }
     }
-  ],
+  ]
 // 長いので省略
+}
 ```
 
 では`list_files`をツールとして渡したものの、関係がなさそうなinputの場合はどうなるでしょうか？
@@ -421,11 +422,31 @@ cargo add futures-util
 
 ### TUIからLLMを呼ぶ
 
-続いて、先ほど消してしまったHTTPリクエストを復活します。これによって、TUIでQwenと会話ができるようになります。
+続いて、HTTP通信を担当する `http.rs` を作り、TUIから呼び出せるようにします。これによって、TUIでQwenと会話ができるようになります。
 
-`src/main.rs` のコードを以下のように変更しましょう。
+まず、`src/http.rs` を新しく作成し、以下のコードをコピーしてください。
 
-[この段階の `main.rs` 全文](steps/tui_http.rs)
+[この段階の `http.rs` 全文](steps/tui_http/http.rs)
+
+`http.rs` の `request` 関数は、リクエストのJSONを受け取ってOllamaへ送り、応答のJSONを返します。
+
+次に、`src/main.rs` を以下のコードに置き換えてください。
+
+[この段階の `main.rs` 全文](steps/tui_http/main.rs)
+
+`mod http;` によって `http.rs` をモジュールとして読み込みます。`main.rs` が入力した文章からリクエストを組み立て、`http::request(&body).await?` で送信し、返ってきたJSONから文章を取り出して画面に表示します。
+
+ファイルの配置は以下のようになります。
+
+```text
+mini-coding-agent/
+└── src/
+    ├── main.rs
+    ├── http.rs
+    └── tool.rs
+```
+
+`main.rs` は画面操作と処理の流れ、`http.rs` はHTTP通信、`tool.rs` はツールの実処理を担当します。この段階では `tool.rs` はまだ使いません。後続の段階でもHTTP通信は同じ関数を使い、`main.rs` にツール呼び出しやAgent Loopを組み込んでいきます。
 
 コードを変更したら`cargo run`してこんな質問をしてみてください。
 
@@ -438,6 +459,10 @@ cargo add futures-util
 ### TUIからツールを使う
 
 続いて、ツールを呼び出す処理を復活させます。
+
+`src/http.rs` は「TUIからLLMを呼ぶ」の段階から変更しません。
+
+[この段階の `http.rs` 全文](steps/tui_list_files/http.rs)
 
 `src/tool.rs` は、先ほど作った `list_files` の実装をそのまま使います。
 
@@ -460,6 +485,10 @@ cargo add futures-util
 ### ツールを増やす
 
 続いて、このCoding Agentにツールを追加します。
+
+`src/http.rs` はそのまま使います。
+
+[この段階の `http.rs` 全文](steps/file_and_command_tools/http.rs)
 
 ```
  list_files(path):  指定したディレクトリの直下にあるファイル・ディレクトリ名を一覧にする(既存)
@@ -508,6 +537,10 @@ ollama run qwen3.5:4b --think=false
 のように複数のツールが必要となる動作や、一つ前の会話を踏まえた動作をしません。
 
 これを解決するためにAgent Loopを組み込みます。
+
+`src/http.rs` はそのまま使います。Loopの中でも `http::request` を呼び出してLLMと通信します。
+
+[この段階の `http.rs` 全文](steps/agent_loop/http.rs)
 
 `src/tool.rs` は「ツールを増やす」の段階から変更しません。
 
