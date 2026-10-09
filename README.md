@@ -526,6 +526,36 @@ ollama run qwen3.5:4b --think=false
 12345679 × 9
 ```
 
+#### 寄り道：追加したツールをテストから直接動かす
+
+`list_files` と同じように、追加した `read_file`、`write_file`、`run_command` もテストから直接呼び出してみましょう。Ollamaを起動せずに、それぞれの動作を確認できます。
+
+先ほどの寄り道で `tempfile` を追加していない場合は、`mini-coding-agent` ディレクトリで以下を実行してください。
+
+```sh
+cargo add tempfile --dev
+```
+
+`src/tool.rs` の中身を以下のコードに置き換えてください。ツールの実装はそのままで、末尾にテストを追加しています。`src/main.rs` と `src/http.rs` の変更は不要です。
+
+[テストを追加した `tool.rs` 全文](steps/file_and_command_tools_test/tool.rs)
+
+`mini-coding-agent` ディレクトリで、以下を実行してください。
+
+```sh
+cargo test tool::tests -- --nocapture
+```
+
+各ツールの実行結果が表示されます。`list_files` のテストも含め、5件のテストが成功すれば次のような結果になります。
+
+以下は出力例です。ターミナルに入力する必要はありません。
+
+```text
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+LLMが返す名前と引数を受け取って呼び出す場合も、テストから直接呼び出す場合も、実行するのは同じRust関数です。
+
 ### Agent Loopを組み込む
 
 さて、ここまででさまざまなツールを呼び出せるようになりましたが、実はまだ足りません。
