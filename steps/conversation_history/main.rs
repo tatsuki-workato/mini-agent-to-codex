@@ -8,6 +8,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
+use serde_json::Value;
 use std::io;
 use tokio::sync::mpsc;
 
@@ -70,10 +71,13 @@ fn draw(frame: &mut Frame, input: &str, messages: &[String], busy: bool) {
 }
 
 async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
-    let (sender, mut receiver) = mpsc::unbounded_channel::<Result<Vec<String>, String>>();
+    let (sender, mut receiver) =
+        mpsc::unbounded_channel::<Result<(Vec<String>, Vec<Value>), String>>();
     let mut events = EventStream::new();
     let mut input = String::new();
     let mut messages: Vec<String> = Vec::new();
+    // 表示用メッセージとは別に、モデルへ送る履歴をユーザー入力の間も保持する。
+    let mut history: Vec<Value> = Vec::new();
     let mut busy = false;
 
     loop {
@@ -95,8 +99,9 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
                             busy = true;
 
                             let sender = sender.clone();
+                            let history = history.clone();
                             tokio::spawn(async move {
-                                let result = agent::run_turn(prompt).await.map_err(|error| error.to_string());
+                                let result = agent::run_turn(prompt, history).await.map_err(|error| error.to_string());
                                 let _ = sender.send(result);
                             });
                         }
@@ -118,7 +123,10 @@ async fn run_ui(terminal: &mut DefaultTerminal) -> io::Result<()> {
             result = receiver.recv(), if busy => {
                 busy = false;
                 match result {
-                    Some(Ok(output)) => messages.extend(output),
+                    Some(Ok((output, new_history))) => {
+                        messages.extend(output);
+                        history = new_history;
+                    }
                     Some(Err(error)) => messages.push(format!("エラー: {error}")),
                     None => messages.push("エラー: 応答を受け取れませんでした".to_string()),
                 }
